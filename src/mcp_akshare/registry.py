@@ -232,6 +232,42 @@ class DocRegistry:
         """获取函数信息"""
         return self.functions.get(full_name)
 
+    def list_all(self, category: str = None, limit: int = 100) -> List[Dict]:
+        """
+        列出所有函数。
+
+        Args:
+            category: 可选，按分类筛选，如 "stock", "futures", "fund" 等
+            limit: 返回结果数量，默认 100
+
+        Returns:
+            函数列表
+        """
+        funcs = list(self.functions.values())
+
+        # 按分类筛选
+        if category:
+            funcs = [f for f in funcs if f.category == category]
+
+        # 排序：按分类和名称
+        funcs.sort(key=lambda x: (x.category, x.name))
+
+        # 限制数量
+        funcs = funcs[:limit]
+
+        return [f.to_search_result() for f in funcs]
+
+    def get_categories(self) -> List[Dict]:
+        """获取所有分类及其函数数量"""
+        categories = {}
+        for func in self.functions.values():
+            cat = func.category
+            if cat not in categories:
+                categories[cat] = {"category": cat, "count": 0}
+            categories[cat]["count"] += 1
+
+        return sorted(categories.values(), key=lambda x: x["category"])
+
     def call(self, func_name: str, params: Dict) -> Any:
         """调用函数 - 支持带或不带 ak_ 前缀"""
         # 尝试查找函数

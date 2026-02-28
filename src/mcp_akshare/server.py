@@ -231,6 +231,56 @@ async def ak_logs(limit: int = 50) -> str:
     return json.dumps(entries, ensure_ascii=False, indent=2)
 
 
+@mcp.tool()
+async def ak_list(category: str = None, limit: int = 100) -> str:
+    """
+    列出所有 akshare 函数。
+
+    获取所有可用函数的完整列表，支持按分类筛选。
+    用于了解系统支持哪些数据接口。
+
+    Args:
+        category: 可选，按分类筛选，如 "stock", "futures", "fund", "index", "option" 等
+        limit: 返回结果数量，默认 100
+
+    Returns:
+        函数列表，包含名称、描述、分类等信息
+    """
+    results = registry.list_all(category=category, limit=limit)
+    total = len(registry.functions)
+
+    output = {
+        "total_functions": total,
+        "returned_count": len(results),
+        "category_filter": category,
+        "functions": results,
+    }
+
+    return json.dumps(output, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+async def ak_categories() -> str:
+    """
+    获取所有函数分类。
+
+    返回所有可用的函数分类及其包含的函数数量。
+    分类包括: stock(股票), futures(期货), fund(基金), index(指数), option(期权) 等。
+
+    Returns:
+        分类列表
+    """
+    categories = registry.get_categories()
+
+    output = {
+        "total_categories": len(categories),
+        "total_functions": len(registry.functions),
+        "categories": categories,
+    }
+
+    return json.dumps(output, ensure_ascii=False, indent=2)
+
+
 def main():
     """启动服务"""
     parser = argparse.ArgumentParser(description="MCP AKShare Server")
