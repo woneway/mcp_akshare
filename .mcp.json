@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "akshare": {
+      "command": "/Users/lianwu/ai/mcp/mcp_akshare/akshare-server",
+      "args": ["/Users/lianwu/ai/mcp/mcp_akshare/run.py"]
+    }
+  }
+}
