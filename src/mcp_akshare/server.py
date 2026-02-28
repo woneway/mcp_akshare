@@ -4,10 +4,27 @@ MCP AKShare Server - 提供 akshare 函数搜索和调用能力
 
 import json
 import os
+import logging
+from datetime import datetime
 from fastmcp import FastMCP
 
 from .registry import DocRegistry
 from .formatters import format_result, format_search_results
+
+# 创建日志目录
+LOG_DIR = '/Users/lianwu/ai/mcp/mcp_akshare/logs'
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(LOG_DIR, 'akshare.log')),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # 创建 MCP 服务
 mcp = FastMCP("akshare")
@@ -17,6 +34,20 @@ mcp = FastMCP("akshare")
 docs_dir = '/Users/lianwu/ai/mcp/mcp_akshare/akshare_docs'
 registry = DocRegistry(docs_dir)
 registry.initialize()
+
+
+def log_call(func_name: str, params: dict, success: bool, error_msg: str = None):
+    """记录调用日志"""
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "function": func_name,
+        "params": params,
+        "success": success,
+    }
+    if error_msg:
+        log_entry["error"] = error_msg
+
+    logger.info(f"CALL: {json.dumps(log_entry, ensure_ascii=False)}")
 
 
 @mcp.tool()
@@ -51,23 +82,51 @@ async def ak_call(function: str, params: str = "{}") -> str:
     先用 ak_search 找到函数名，然后用 ak_call 调用。
 
     Args:
-        function: 函数全名，如 "ak_stock_zh_a_spot_em"
-        params: JSON 格式参数字典，如 '{"symbol": "000001"}'
+        function: 函数全名，如 "stock_lhb_detail_daily_sina"
+        params: JSON 格式参数字典，如 '{"date": "20260227"}'
 
     Returns:
         函数执行结果
     """
     # 解析参数
+    params_dict = {}
     try:
         if isinstance(params, str):
-            params_dict = json.loads(params)
+            params_dict = json.loads(params) if params.strip() else {}
         else:
             params_dict = params
     except json.JSONDecodeError as e:
+        log_call(function, params, False, f"参数解析错误: {e}")
         return f"参数解析错误: {e}"
 
     # 调用函数
-    result = registry.call(function, params_dict)
+    start_time = datetime.now()
+    try:
+        result = registry.call(function, params_dict)
+        success = True
+        error_msg = None
+    except Exception as e:
+        result = {"error": str(e)}
+        success = False
+        error_msg = str(e)
+
+    # 记录日志
+    duration = (datetime.now() - start_time).total_seconds()
+    log_entry = {
+        "timestamp": start_time.isoformat(),
+        "function": function,
+        "params": params_dict,
+        "duration_seconds": duration,
+        "success": success,
+    }
+    if not success:
+        log_entry["error"] = error_msg
+    elif isinstance(result, dict) and "error" in result:
+        # akshare 返回错误
+        log_entry["success"] = False
+        log_entry["error"] = result.get("error")
+
+    logger.info(f"CALL: {json.dumps(log_entry, ensure_ascii=False)}")
 
     # 格式化输出
     formatted = format_result(result)
@@ -76,8 +135,43 @@ async def ak_call(function: str, params: str = "{}") -> str:
     return json.dumps(formatted, ensure_ascii=False, indent=2)
 
 
+@mcp.tool()
+async def ak_logs(limit: int = 50) -> str:
+    """
+    查看调用日志。
+
+    Args:
+        limit: 返回最近的记录数，默认 50
+
+    Returns:
+        调用日志列表
+    """
+    log_file = os.path.join(LOG_DIR, 'akshare.log')
+    if not os.path.exists(log_file):
+        return "暂无调用记录"
+
+    with open(log_file, 'r') as f:
+        lines = f.readlines()
+
+    # 解析并返回最近的日志
+    entries = []
+    for line in lines[-limit:]:
+        if 'CALL:' in line:
+            try:
+                entry = json.loads(line.split('CALL:')[1].strip())
+                entries.append(entry)
+            except:
+                pass
+
+    # 反转顺序，最新的在前
+    entries.reverse()
+
+    return json.dumps(entries, ensure_ascii=False, indent=2)
+
+
 def main():
     """启动服务"""
+    logger.info("MCP AKShare 服务启动")
     mcp.run()
 
 
