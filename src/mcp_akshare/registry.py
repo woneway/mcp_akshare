@@ -191,19 +191,28 @@ class DocRegistry:
         """获取函数信息"""
         return self.functions.get(full_name)
 
-    def call(self, full_name: str, params: Dict) -> Any:
-        """调用函数"""
-        if full_name not in self.functions:
-            raise ValueError(f"未找到函数: {full_name}")
+    def call(self, func_name: str, params: Dict) -> Any:
+        """调用函数 - 支持带或不带 ak_ 前缀"""
+        # 尝试查找函数
+        info = None
+        # 1. 直接查找（不带前缀）
+        if func_name in self.functions:
+            info = self.functions[func_name]
+        # 2. 查找带 ak_ 前缀的
+        elif f"ak_{func_name}" in self.functions:
+            info = self.functions[f"ak_{func_name}"]
 
-        info = self.functions[full_name]
-        func_name = info.name
+        if info is None:
+            raise ValueError(f"未找到函数: {func_name}")
+
+        # 获取实际的 akshare 函数名
+        actual_func_name = info.name
 
         try:
             # 直接从 akshare 主模块调用
-            func = getattr(ak, func_name, None)
+            func = getattr(ak, actual_func_name, None)
             if func is None:
-                raise ValueError(f"无法找到函数: {func_name}")
+                raise ValueError(f"无法找到函数: {actual_func_name}")
 
             result = func(**params)
             return result

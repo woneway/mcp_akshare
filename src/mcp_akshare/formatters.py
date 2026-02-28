@@ -123,9 +123,9 @@ def format_search_results(results: List[Dict]) -> str:
 
     for i, r in enumerate(results, 1):
         params_str = ", ".join([p["name"] for p in r.get("params", [])])
-        # 显示 full_name（带 ak_ 前缀的完整名称）
-        full_name = r.get('full_name', r.get('name', ''))
-        lines.append(f"{i}. **{full_name}**")
+        # 显示 name（不带 ak_ 前缀）
+        name = r.get('name', '')
+        lines.append(f"{i}. **{name}**")
         lines.append(f"   描述: {r['description']}")
         lines.append(f"   分类: {r['category']}")
         if params_str:
