@@ -203,13 +203,17 @@ async def ak_logs(limit: int = 50) -> str:
     Returns:
         调用日志列表
     """
+    # 验证 limit 参数
+    limit = max(1, min(limit, 1000))
+
     log_file = os.path.join(LOG_DIR, 'akshare.log')
     if not os.path.exists(log_file):
         return "暂无调用记录"
 
     # 使用 deque 高效获取最后 limit 行，避免加载整个文件
     from collections import deque
-    last_lines = deque(open(log_file, 'r'), maxlen=limit)
+    with open(log_file, 'r') as f:
+        last_lines = deque(f, maxlen=limit)
 
     # 解析并返回最近的日志
     entries = []
@@ -218,8 +222,8 @@ async def ak_logs(limit: int = 50) -> str:
             try:
                 entry = json.loads(line.split('CALL:')[1].strip())
                 entries.append(entry)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"解析日志行失败: {e}")
 
     # 反转顺序，最新的在前
     entries.reverse()

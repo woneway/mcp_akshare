@@ -40,14 +40,14 @@ def format_result(result: Any, max_rows: int = 100) -> Any:
 def _format_dataframe(df: pd.DataFrame, max_rows: int) -> Dict:
     """格式化 DataFrame"""
     # 限制行数
+    truncated = False
     if len(df) > max_rows:
-        df = df.head(max_rows)
+        df = df.head(max_rows).copy()  # 截断时一次性复制
         truncated = True
     else:
-        truncated = False
+        df = df.copy()  # 非截断也需要复制避免修改原数据
 
     # 转换日期类型
-    df = df.copy()
     for col in df.columns:
         if df[col].dtype == "object":
             # 尝试检测日期
