@@ -11,6 +11,33 @@ from typing import Any, Dict, List, Optional
 import akshare as ak
 
 
+class RegistryError(Exception):
+    """注册表基础异常"""
+    pass
+
+
+class FunctionNotFoundError(RegistryError):
+    """函数未找到"""
+    def __init__(self, func_name: str):
+        self.func_name = func_name
+        super().__init__(f"未找到函数: {func_name}")
+
+
+class ParameterError(RegistryError):
+    """参数错误"""
+    def __init__(self, errors: List[str]):
+        self.errors = errors
+        super().__init__(f"参数错误: {'; '.join(errors)}")
+
+
+class AkshareError(RegistryError):
+    """AKShare 执行错误"""
+    def __init__(self, message: str, func_name: str = None):
+        self.message = message
+        self.func_name = func_name
+        super().__init__(f"AKShare 执行错误: {message}")
+
+
 @dataclass
 class FunctionInfo:
     """函数元信息"""
@@ -203,7 +230,12 @@ class DocRegistry:
             info = self.functions[f"ak_{func_name}"]
 
         if info is None:
-            raise ValueError(f"未找到函数: {func_name}")
+            raise FunctionNotFoundError(func_name)
+
+        # 验证参数
+        param_errors = self._validate_params(info, params)
+        if param_errors:
+            raise ParameterError(param_errors)
 
         # 获取实际的 akshare 函数名
         actual_func_name = info.name
@@ -212,31 +244,46 @@ class DocRegistry:
             # 直接从 akshare 主模块调用
             func = getattr(ak, actual_func_name, None)
             if func is None:
-                raise ValueError(f"无法找到函数: {actual_func_name}")
+                raise FunctionNotFoundError(actual_func_name)
 
             result = func(**params)
             return result
 
+        except TypeError as e:
+            # 参数错误
+            raise ParameterError([str(e)])
         except Exception as e:
-            return {"error": str(e)}
+            # 其他错误
+            raise AkshareError(str(e), actual_func_name)
+
+    def _validate_params(self, info: FunctionInfo, params: Dict) -> List[str]:
+        """验证参数，返回错误列表"""
+        errors = []
+        param_names = {p["name"] for p in info.params}
+
+        # 检查多余参数
+        for key in params:
+            if key not in param_names:
+                errors.append(f"未知参数: {key}，可用参数: {list(param_names)}")
+
+        return errors
 
 
 def _get_default_docs_dir():
-    """获取默认文档目录路径 - 直接使用绝对路径避免 __file__ 问题"""
-    # 直接使用绝对路径
-    abs_path = '/Users/lianwu/ai/mcp/mcp_akshare/akshare_docs'
+    """获取默认文档目录路径"""
+    # 从环境变量获取
+    env_path = os.environ.get('AKSHARE_DOCS_DIR')
+    if env_path and os.path.exists(env_path):
+        return env_path
 
-    if os.path.exists(abs_path):
-        return abs_path
-
-    # 回退：相对于本文件的路径
-    base_dir = os.path.dirname(__file__)
-    relative_path = os.path.join(base_dir, 'akshare_docs')
+    # 相对于项目根目录
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    relative_path = os.path.join(project_root, 'akshare_docs')
 
     if os.path.exists(relative_path):
         return relative_path
 
-    return abs_path
+    return relative_path  # 返回路径让初始化时给出明确错误
 
 
 # 默认注册表实例

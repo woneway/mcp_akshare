@@ -2,25 +2,40 @@
 MCP AKShare Server - 提供 akshare 函数搜索和调用能力
 """
 
+import asyncio
 import json
 import os
 import logging
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from fastmcp import FastMCP
 
-from .registry import DocRegistry
+from .registry import DocRegistry, FunctionNotFoundError, ParameterError, AkshareError
 from .formatters import format_result, format_search_results
 
-# 创建日志目录
-LOG_DIR = '/Users/lianwu/ai/mcp/mcp_akshare/logs'
-os.makedirs(LOG_DIR, exist_ok=True)
+# 获取项目根目录
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 配置日志
+# 配置日志目录 - 使用项目根目录下的 logs
+LOG_DIR = os.environ.get('AKSHARE_LOG_DIR', os.path.join(PROJECT_ROOT, 'logs'))
+
+# 配置日志 - 使用轮转
+os.makedirs(LOG_DIR, exist_ok=True)
+log_file = os.path.join(LOG_DIR, 'akshare.log')
+
+# 轮转日志：单文件10MB，保留5个备份
+rotating_handler = RotatingFileHandler(
+    log_file,
+    maxBytes=10 * 1024 * 1024,  # 10MB
+    backupCount=5,
+    encoding='utf-8'
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(LOG_DIR, 'akshare.log')),
+        rotating_handler,
         logging.StreamHandler()
     ]
 )
@@ -30,8 +45,7 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP("akshare")
 
 # 初始化注册表 - 使用文档目录
-# 直接使用绝对路径
-docs_dir = '/Users/lianwu/ai/mcp/mcp_akshare/akshare_docs'
+docs_dir = os.environ.get('AKSHARE_DOCS_DIR', os.path.join(PROJECT_ROOT, 'akshare_docs'))
 registry = DocRegistry(docs_dir)
 registry.initialize()
 
@@ -99,14 +113,26 @@ async def ak_call(function: str, params: str = "{}") -> str:
         log_call(function, params, False, f"参数解析错误: {e}")
         return f"参数解析错误: {e}"
 
-    # 调用函数
+    # 调用函数 - 使用线程池避免阻塞事件循环
     start_time = datetime.now()
     try:
-        result = registry.call(function, params_dict)
+        result = await asyncio.to_thread(registry.call, function, params_dict)
         success = True
         error_msg = None
+    except FunctionNotFoundError as e:
+        result = {"error": str(e), "type": "FunctionNotFound"}
+        success = False
+        error_msg = str(e)
+    except ParameterError as e:
+        result = {"error": str(e), "type": "ParameterError", "details": e.errors}
+        success = False
+        error_msg = str(e)
+    except AkshareError as e:
+        result = {"error": e.message, "type": "AkshareError", "function": e.func_name}
+        success = False
+        error_msg = str(e)
     except Exception as e:
-        result = {"error": str(e)}
+        result = {"error": str(e), "type": "UnknownError"}
         success = False
         error_msg = str(e)
 
