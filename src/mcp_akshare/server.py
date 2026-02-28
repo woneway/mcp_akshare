@@ -2,12 +2,15 @@
 MCP AKShare Server - 提供 akshare 函数搜索和调用能力
 """
 
+import argparse
 import asyncio
 import json
 import os
 import logging
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
+
+import pandas as pd
 from fastmcp import FastMCP
 
 from .registry import DocRegistry, FunctionNotFoundError, ParameterError, AkshareError
@@ -31,14 +34,17 @@ rotating_handler = RotatingFileHandler(
     encoding='utf-8'
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        rotating_handler,
-        logging.StreamHandler()
-    ]
-)
+# 配置日志 - 避免重复添加 handler
+root_logger = logging.getLogger()
+if not root_logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            rotating_handler,
+            logging.StreamHandler()
+        ]
+    )
 logger = logging.getLogger(__name__)
 
 # 创建 MCP 服务
@@ -48,20 +54,6 @@ mcp = FastMCP("akshare")
 docs_dir = os.environ.get('AKSHARE_DOCS_DIR', os.path.join(PROJECT_ROOT, 'akshare_docs'))
 registry = DocRegistry(docs_dir)
 registry.initialize()
-
-
-def log_call(func_name: str, params: dict, success: bool, error_msg: str = None):
-    """记录调用日志"""
-    log_entry = {
-        "timestamp": datetime.now().isoformat(),
-        "function": func_name,
-        "params": params,
-        "success": success,
-    }
-    if error_msg:
-        log_entry["error"] = error_msg
-
-    logger.info(f"CALL: {json.dumps(log_entry, ensure_ascii=False)}")
 
 
 @mcp.tool()
@@ -79,7 +71,23 @@ async def ak_search(keyword: str, limit: int = 20) -> str:
     Returns:
         匹配的函数列表，包含名称、描述、分类、参数等信息
     """
-    results = registry.search(keyword, limit)
+    start_time = datetime.now()
+    try:
+        results = registry.search(keyword, limit)
+    except Exception as e:
+        logger.error(f"搜索失败: {e}", exc_info=True)
+        return f"搜索失败: {str(e)}"
+    duration = (datetime.now() - start_time).total_seconds()
+
+    # 记录搜索日志
+    logger.info(json.dumps({
+        "timestamp": start_time.isoformat(),
+        "type": "search",
+        "keyword": keyword,
+        "limit": limit,
+        "duration_seconds": duration,
+        "result_count": len(results),
+    }, ensure_ascii=False))
 
     if not results:
         return f"未找到包含 '{keyword}' 的函数，请尝试其他关键词"
@@ -138,12 +146,34 @@ async def ak_call(function: str, params: str = "{}") -> str:
 
     # 记录日志
     duration = (datetime.now() - start_time).total_seconds()
+
+    # 确定错误类型
+    error_type = None
+    if not success:
+        if isinstance(result, dict):
+            error_type = result.get("type", "UnknownError")
+        else:
+            error_type = "UnknownError"
+
+    # 统计返回数据量
+    result_rows = None
+    if success and result is not None:
+        if isinstance(result, pd.DataFrame):
+            result_rows = len(result)
+        elif isinstance(result, list):
+            result_rows = len(result)
+        elif isinstance(result, dict) and "data" in result:
+            if isinstance(result["data"], list):
+                result_rows = len(result["data"])
+
     log_entry = {
         "timestamp": start_time.isoformat(),
         "function": function,
         "params": params_dict,
         "duration_seconds": duration,
         "success": success,
+        "error_type": error_type,
+        "result_rows": result_rows,
     }
     if not success:
         log_entry["error"] = error_msg
@@ -151,6 +181,7 @@ async def ak_call(function: str, params: str = "{}") -> str:
         # akshare 返回错误
         log_entry["success"] = False
         log_entry["error"] = result.get("error")
+        log_entry["error_type"] = "AkshareReturnedError"
 
     logger.info(f"CALL: {json.dumps(log_entry, ensure_ascii=False)}")
 
@@ -176,12 +207,13 @@ async def ak_logs(limit: int = 50) -> str:
     if not os.path.exists(log_file):
         return "暂无调用记录"
 
-    with open(log_file, 'r') as f:
-        lines = f.readlines()
+    # 使用 deque 高效获取最后 limit 行，避免加载整个文件
+    from collections import deque
+    last_lines = deque(open(log_file, 'r'), maxlen=limit)
 
     # 解析并返回最近的日志
     entries = []
-    for line in lines[-limit:]:
+    for line in last_lines:
         if 'CALL:' in line:
             try:
                 entry = json.loads(line.split('CALL:')[1].strip())
@@ -197,8 +229,20 @@ async def ak_logs(limit: int = 50) -> str:
 
 def main():
     """启动服务"""
-    logger.info("MCP AKShare 服务启动")
-    mcp.run()
+    parser = argparse.ArgumentParser(description="MCP AKShare Server")
+    parser.add_argument("--mode", default="stdio",
+                        choices=["stdio", "http", "sse", "streamable-http"],
+                        help="传输模式: stdio(默认), http, sse, streamable-http")
+    parser.add_argument("--host", default="127.0.0.1", help="监听地址")
+    parser.add_argument("--port", type=int, default=8000, help="监听端口")
+    args = parser.parse_args()
+
+    logger.info(f"MCP AKShare 服务启动 (模式: {args.mode})")
+
+    if args.mode == "stdio":
+        mcp.run()
+    else:
+        mcp.run(transport=args.mode, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

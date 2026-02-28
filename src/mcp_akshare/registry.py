@@ -5,10 +5,19 @@ AKShare 函数注册表 - 基于文档文件解析
 
 import os
 import re
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import akshare as ak
+
+logger = logging.getLogger(__name__)
+
+# 预编译正则表达式
+_INTERFACE_PATTERN = re.compile(r'接口:\s*(\w+)\s*\n(.*?)(?=\n接口:\s*\w+\s*\n|\Z)', re.DOTALL)
+_DESC_PATTERN = re.compile(r'描述:\s*([^\n]+)')
+_INPUT_PARAMS_PATTERN = re.compile(r'输入参数\s*\n((?:\|[^\n]+\n)+)')
+_PARAM_ROW_PATTERN = re.compile(r'\|\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\|')
 
 
 class RegistryError(Exception):
@@ -77,19 +86,25 @@ class DocRegistry:
         if self._initialized:
             return
 
-        print(f"📄 解析 akshare 文档 from {self.docs_dir}...")
+        logger.info(f"解析 akshare 文档 from {self.docs_dir}...")
         self._parse_all_docs()
         self._build_index()
-        print(f"✅ 已索引 {len(self.functions)} 个函数")
+        logger.info(f"已索引 {len(self.functions)} 个函数")
         self._initialized = True
 
     def _parse_all_docs(self):
         """解析所有文档目录下的 .md 文件"""
         if not os.path.isdir(self.docs_dir):
-            print(f"⚠️ 文档目录不存在: {self.docs_dir}")
+            logger.warning(f"文档目录不存在: {self.docs_dir}")
             return
 
-        for filename in os.listdir(self.docs_dir):
+        try:
+            filenames = os.listdir(self.docs_dir)
+        except OSError as e:
+            logger.error(f"读取文档目录失败: {e}")
+            return
+
+        for filename in filenames:
             if not filename.endswith('.md'):
                 continue
 
@@ -104,20 +119,19 @@ class DocRegistry:
 
         # 解析每个接口块
         # 格式: 接口: 函数名 ... (直到下一个接口: 或文件结束)
-        interface_pattern = r'接口:\s*(\w+)\s*\n(.*?)(?=\n接口:\s*\w+\s*\n|\Z)'
-        matches = re.findall(interface_pattern, content, re.DOTALL)
+        matches = _INTERFACE_PATTERN.findall(content)
 
         for func_name, block in matches:
             # 解析描述
             description = ""
-            desc_match = re.search(r'描述:\s*([^\n]+)', block)
+            desc_match = _DESC_PATTERN.search(block)
             if desc_match:
                 description = desc_match.group(1).strip()
 
             # 解析输入参数
             params = []
             # 更精确的匹配：从"输入参数"标题到表格结束（下一个空行或输出参数）
-            input_match = re.search(r'输入参数\s*\n((?:\|[^\n]+\n)+)', block)
+            input_match = _INPUT_PARAMS_PATTERN.search(block)
             if input_match:
                 table_lines = input_match.group(1).strip().split('\n')
                 for line in table_lines:
@@ -126,7 +140,7 @@ class DocRegistry:
                         continue
                     # 匹配参数行: | name | type | ...
                     # 参数名只能是字母数字下划线
-                    match = re.match(r'\|\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\|', line)
+                    match = _PARAM_ROW_PATTERN.match(line)
                     if match:
                         param_name = match.group(1)
                         # 提取类型（第二列）

@@ -122,7 +122,8 @@ def format_search_results(results: List[Dict]) -> str:
     lines = [f"找到 {len(results)} 个匹配的函数:\n"]
 
     for i, r in enumerate(results, 1):
-        params_str = ", ".join([p["name"] for p in r.get("params", [])])
+        params_list = r.get("params") or []
+        params_str = ", ".join([p["name"] for p in params_list])
         # 显示 name（不带 ak_ 前缀）
         name = r.get('name', '')
         lines.append(f"{i}. **{name}**")
