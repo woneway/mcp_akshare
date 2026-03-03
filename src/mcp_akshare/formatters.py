@@ -47,12 +47,17 @@ def _format_dataframe(df: pd.DataFrame, max_rows: int) -> Dict:
     else:
         df = df.copy()  # 非截断也需要复制避免修改原数据
 
-    # 转换日期类型
+    # 转换日期类型 - 只有当列中大部分值看起来像日期时才转换
     for col in df.columns:
         if df[col].dtype == "object":
-            # 尝试检测日期
-            sample = df[col].dropna().iloc[:10] if len(df) > 0 else []
-            if len(sample) > 0:
+            # 跳过包含空值的列
+            if df[col].isna().any() or (df[col] == '').any():
+                continue
+
+            # 检查是否大部分值像日期 (包含 - 或 /)
+            sample = df[col].astype(str).iloc[:10]
+            date_like = sum(1 for v in sample if '-' in v or '/' in v)
+            if date_like >= len(sample) * 0.5:
                 try:
                     df[col] = pd.to_datetime(df[col], errors="coerce")
                 except Exception:

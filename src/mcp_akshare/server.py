@@ -14,6 +14,7 @@ import pandas as pd
 from fastmcp import FastMCP
 
 from .registry import DocRegistry, FunctionNotFoundError, ParameterError, AkshareError
+from .registry_baostock import BaostockRegistry, FunctionNotFoundError as BSFunctionNotFoundError, ParameterError as BSPParameterError, BaostockError
 from .formatters import format_result, format_search_results
 
 # 获取项目根目录
@@ -54,6 +55,11 @@ mcp = FastMCP("akshare")
 docs_dir = os.environ.get('AKSHARE_DOCS_DIR', os.path.join(PROJECT_ROOT, 'akshare_docs'))
 registry = DocRegistry(docs_dir)
 registry.initialize()
+
+# 初始化 baostock 注册表
+baostock_docs_dir = os.environ.get('BAOSTOCK_DOCS_DIR', os.path.join(PROJECT_ROOT, 'baostock_docs'))
+baostock_registry = BaostockRegistry(baostock_docs_dir)
+baostock_registry.initialize()
 
 
 @mcp.tool()
@@ -275,6 +281,165 @@ async def ak_categories() -> str:
     output = {
         "total_categories": len(categories),
         "total_functions": len(registry.functions),
+        "categories": categories,
+    }
+
+    return json.dumps(output, ensure_ascii=False, indent=2)
+
+
+# ==================== Baostock 工具函数 ====================
+
+@mcp.tool()
+async def ba_search(keyword: str, limit: int = 20) -> str:
+    """
+    搜索 baostock 函数。
+
+    根据关键词搜索可用函数，返回匹配的函数元数据。
+    支持按函数名、描述、分类搜索。
+
+    Args:
+        keyword: 搜索关键词，如 "股票"、"K线"、"财务" 等
+        limit: 返回结果数量，默认 20
+
+    Returns:
+        匹配的函数列表，包含名称、描述、分类、参数等信息
+    """
+    try:
+        results = baostock_registry.search(keyword, limit)
+    except Exception as e:
+        logger.error(f"Baostock 搜索失败: {e}", exc_info=True)
+        return f"搜索失败: {str(e)}"
+
+    if not results:
+        return f"未找到包含 '{keyword}' 的 baostock 函数，请尝试其他关键词"
+
+    return format_search_results(results)
+
+
+@mcp.tool()
+async def ba_call(function: str, params: str = "{}") -> str:
+    """
+    调用 baostock 函数。
+
+    通用函数调用器，可以调用任意 baostock 函数。
+    先用 ba_search 找到函数名，然后用 ba_call 调用。
+
+    Args:
+        function: 函数全名，如 "query_stock_basic"
+        params: JSON 格式参数字典，如 '{"code": "sh.600000"}'
+
+    Returns:
+        函数执行结果
+    """
+    # 解析参数
+    params_dict = {}
+    try:
+        if isinstance(params, str):
+            params_dict = json.loads(params) if params.strip() else {}
+        else:
+            params_dict = params
+    except json.JSONDecodeError as e:
+        return f"参数解析错误: {e}"
+
+    # 调用函数
+    start_time = datetime.now()
+    try:
+        result = await asyncio.to_thread(baostock_registry.call, function, params_dict)
+        success = True
+        error_msg = None
+    except BSFunctionNotFoundError as e:
+        result = {"error": str(e), "type": "FunctionNotFound"}
+        success = False
+        error_msg = str(e)
+    except BSPParameterError as e:
+        result = {"error": str(e), "type": "ParameterError", "details": e.errors}
+        success = False
+        error_msg = str(e)
+    except BaostockError as e:
+        result = {"error": e.message, "type": "BaostockError", "function": e.func_name}
+        success = False
+        error_msg = str(e)
+    except Exception as e:
+        result = {"error": str(e), "type": "UnknownError"}
+        success = False
+        error_msg = str(e)
+
+    # 记录日志
+    duration = (datetime.now() - start_time).total_seconds()
+    error_type = None
+    if not success:
+        if isinstance(result, dict):
+            error_type = result.get("type", "UnknownError")
+        else:
+            error_type = "UnknownError"
+
+    result_rows = None
+    if success and result is not None:
+        if isinstance(result, pd.DataFrame):
+            result_rows = len(result)
+
+    log_entry = {
+        "timestamp": start_time.isoformat(),
+        "source": "baostock",
+        "function": function,
+        "params": params_dict,
+        "duration_seconds": duration,
+        "success": success,
+        "error_type": error_type,
+        "result_rows": result_rows,
+    }
+    if not success:
+        log_entry["error"] = error_msg
+
+    logger.info(f"CALL: {json.dumps(log_entry, ensure_ascii=False)}")
+
+    # 格式化输出
+    formatted = format_result(result)
+    return json.dumps(formatted, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+async def ba_list(category: str = None, limit: int = 100) -> str:
+    """
+    列出所有 baostock 函数。
+
+    获取所有可用函数的完整列表，支持按分类筛选。
+
+    Args:
+        category: 可选，按分类筛选，如 "stock", "macro" 等
+        limit: 返回结果数量，默认 100
+
+    Returns:
+        函数列表，包含名称、描述、分类等信息
+    """
+    results = baostock_registry.list_all(category=category, limit=limit)
+    total = len(baostock_registry.functions)
+
+    output = {
+        "total_functions": total,
+        "returned_count": len(results),
+        "category_filter": category,
+        "functions": results,
+    }
+
+    return json.dumps(output, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+async def ba_categories() -> str:
+    """
+    获取所有 baostock 函数分类。
+
+    返回所有可用的函数分类及其包含的函数数量。
+
+    Returns:
+        分类列表
+    """
+    categories = baostock_registry.get_categories()
+
+    output = {
+        "total_categories": len(categories),
+        "total_functions": len(baostock_registry.functions),
         "categories": categories,
     }
 

@@ -5,6 +5,7 @@ description = "MCP server for akshare financial data"
 requires-python = ">=3.10"
 dependencies = [
     "akshare>=1.14.0",
+    "baostock>=0.8.8",
     "fastmcp>=2.0.0",
     "pandas>=2.0.0",
 ]
