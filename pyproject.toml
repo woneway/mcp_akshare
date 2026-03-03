@@ -19,4 +19,21 @@ build-backend = "hatchling.build"
 dev-dependencies = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-cov>=7.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+# 排除 server.py (MCP 工具函数，难以单元测试)
+omit = ["*/server.py"]
+
+[tool.coverage.report]
+# 排除 server.py
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
 ]
