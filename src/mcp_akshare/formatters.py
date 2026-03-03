@@ -39,9 +39,12 @@ def format_result(result: Any, max_rows: int = 100) -> Any:
 
 def _format_dataframe(df: pd.DataFrame, max_rows: int) -> Dict:
     """格式化 DataFrame"""
+    # 记录原始行数
+    original_rows = len(df)
+
     # 限制行数
     truncated = False
-    if len(df) > max_rows:
+    if original_rows > max_rows:
         df = df.head(max_rows).copy()  # 截断时一次性复制
         truncated = True
     else:
@@ -78,7 +81,7 @@ def _format_dataframe(df: pd.DataFrame, max_rows: int) -> Dict:
 
     if truncated:
         result["warning"] = f"数据已截断，只显示前 {max_rows} 行"
-        result["total_rows"] = len(df)
+        result["total_rows"] = original_rows
 
     return result
 

@@ -266,7 +266,7 @@ class TencentRegistry:
                 return self._call_industry(params)
             else:
                 raise FunctionNotFoundError(info.name)
-        except TencentError:
+        except (TencentError, ParameterError, FunctionNotFoundError):
             raise
         except Exception as e:
             raise TencentError(str(e), info.name)
