@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /opt/homebrew/bin/python3 "$@"
+exec /opt/homebrew/bin/uv run python3.10 /Users/lianwu/ai/mcp/mcp_akshare/run.py "$@"
